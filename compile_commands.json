@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/home/user/Source/London-Staged-Solver",
+  "command": "/usr/bin/c++  -DBOOST_NO_AUTO_PTR -DDEBUG -DTBB_DO_ASSERT=1 -DTBB_USE_DEBUG -isystem /usr/lib/dealii-9.2.0/installation_no_gsl/include -isystem /usr/lib/dealii-9.2.0/installation_no_gsl/include/deal.II/bundled    -pedantic -fPIC -Wall -Wextra -Woverloaded-virtual -Wpointer-arith -Wsign-compare -Wswitch -Wsynth -Wwrite-strings -Wno-placement-new -Wno-literal-suffix -Wno-psabi -fopenmp-simd -std=c++17 -Wno-parentheses -Wno-unused-local-typedefs -O0 -ggdb -Wa,--compress-debug-sections -o CMakeFiles/solver.dir/solver.cc.o -c /home/user/Source/London-Staged-Solver/solver.cc",
+  "file": "/home/user/Source/London-Staged-Solver/solver.cc"
+}
+]
