@@ -2,3 +2,10 @@
 .clangd/
 CMakeFiles/
 *.swp
+/Geometry
+
+Stuart_Cordier_Notes.pdf
+cylinder_shell_with_core.plist
+linked_libs.txt
+notes.md
+solver

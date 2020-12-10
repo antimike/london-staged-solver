@@ -1,4 +1,9 @@
+//For grid visualization
+#include <deal.II/grid/grid_out.h>
+
 //Includes copied from vector-poisson-solver
+#include <deal.II/base/tensor.h>
+#include <boost/math/constants/constants.hpp>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/logstream.h>
 #include <deal.II/base/function.h>
@@ -12,6 +17,7 @@
 
 #include <deal.II/grid/tria.h>
 #include <deal.II/grid/grid_generator.h>
+#include <deal.II/grid/grid_tools.h>
 #include <deal.II/grid/tria_accessor.h>
 #include <deal.II/grid/tria_iterator.h>
 #include <deal.II/grid/grid_refinement.h>
@@ -40,11 +46,12 @@ namespace LondonStagedSolver
   using namespace dealii;
 
   template<int dim>
-    class LondonStagedSolver
+    class LondonStagedSolverClass
     {
       public:
-        LondonStagedSolver(const unsigned int completeness_degree);
+        LondonStagedSolverClass(const unsigned int completeness_degree);
         void run();
+        void print_grids();
 
       private:
 
@@ -53,9 +60,12 @@ namespace LondonStagedSolver
         {
           sample_id,
           exterior_vacuum_id,
-          hole_id_upper,
-          hole_id_lower,
+          core_upper_id,
+          core_lower_id,
         };
+
+        // Degree of finite elements to use
+        const unsigned int completeness_degree;
 
         // Convenience wrapper around material id enum
         static bool cell_is_in_sample(
@@ -114,17 +124,24 @@ namespace LondonStagedSolver
     };
 
   template <int dim>
-    LondonStagedSolver<dim>::LondonStagedSolver(const unsigned int penalty_constant)
-    : penalty_constant(penalty_constant),
+    LondonStagedSolverClass<dim>::LondonStagedSolverClass(const unsigned int completeness_degree)
+    : completeness_degree(penalty_constant),
+    penalty_constant(1.0),
     triangulation(Triangulation<dim>::maximum_smoothing),
     dof_handler(triangulation),
-    int_fe(FE_Nothing<1>(),     // Psi (magnetic scalar potential) is not needed inside the sample
+    int_fe(FE_Nothing<dim>(),     // Psi (magnetic scalar potential) is not needed inside the sample
+        1,
+        FE_Q<dim>(completeness_degree),
         dim,                      // A* (vector potential)---needed in both regions
+        FE_Q<dim>(completeness_degree),
         1                         // theta---only needed inside the sample
         ),
-    ext_fe(1,                   // Psi
+    ext_fe(FE_Q<dim>(completeness_degree),
+        1,                   // Psi
+        FE_Q<dim>(completeness_degree),
         dim,                    // A*
-        FE_Nothing<1>()         // theta
+        FE_Nothing<dim>(),         // theta
+        1
         )
   {
     // Push the finite elements into the HP collection
@@ -134,7 +151,7 @@ namespace LondonStagedSolver
   }
 
   template <int dim>
-    bool LondonStagedSolver<dim>::cell_is_in_sample(
+    bool LondonStagedSolverClass<dim>::cell_is_in_sample(
         const typename hp::DoFHandler<dim>::cell_iterator &cell)
     {
       return (cell->material_id() == sample_id);
@@ -143,25 +160,119 @@ namespace LondonStagedSolver
   // Makes initial grid
   // Currently consists of a cylindrical shell inside a larger hypercube (to represent the surrounding vacuum)
   template <int dim>
-    void LondonStagedSolver<dim>::make_grid()
+    void LondonStagedSolverClass<dim>::make_grid()
     {
+      const double cube_length = 8;
+      const int initial_cube_granularity = 8;
+      const double cylinder_length = 6;
+      const double inner_radius = 1;
+      const double outer_radius = 3;
+
       Triangulation<dim> sample;
       Triangulation<dim> vacuum;
-      Triangulation<dim> hole_upper;
-      Triangulation<dim> hole_lower;
+      Triangulation<dim> core_upper;
+      Triangulation<dim> core_lower;
+      Triangulation<dim> sample_plus_core;
 
-      GridGenerator::subdivided_hyper_cube(vacuum, 8, -1, 1);
-      GridGenerator::cylinder_shell(sample, 6, 1, 3);
-      sample->set_material_id(sample_id);
-      GridGenerator::create_triangulation_with_removed_cells(vacuum, sample, vacuum);
-      vacuum->set_material_id(exterior_vacuum_id);
-      GridGenerator::merge_triangulations(sample, vacuum, triangulation);
+      // Creates a hypercube of length cube_length centered on origin
+      // "initial_cube_granularity" sets the number of initial subdivisions
+      GridGenerator::subdivided_hyper_cube(
+          vacuum, 
+          initial_cube_granularity, 
+          -cube_length / 2, 
+          cube_length / 2);
+
+      // Creates cylindrical shell centered on z-axis with end-faces at z = 0, z = L
+      GridGenerator::cylinder_shell(
+          sample,
+          cylinder_length,
+          inner_radius,
+          outer_radius
+          );
+
+      // Shift the cylinder to be centered on the origin with axis parallel to the x-axis
+      GridTools::shift(
+          //new Tensor<1, dim>(0, 0, -cylinder_length/2),
+          Point<dim>(0, 0, -cylinder_length/2),
+            sample
+          );
+      GridTools::rotate(
+          boost::math::double_constants::pi/2,
+          2,       // Rotate about y-axis
+          sample);
+
+      // Upper part of "core" region (cylindrical hole)
+      // Centered on x-axis
+      GridGenerator::cylinder(
+          core_upper,
+          inner_radius,
+          cylinder_length/4
+          );
+
+      // Lower part of "core" region
+      // Centered on x-axis
+      GridGenerator::cylinder(
+          core_lower,
+          inner_radius,
+          cylinder_length/4
+          );
+
+      // Shift the core triangulations to the x > 0 and x < 0 core regions (respectively)
+      GridTools::shift(
+          //new Tensor<1, dim>(cylinder_length/4, 0, 0),
+          Point<3>(cylinder_length/4, 0, 0),
+          core_upper
+          );
+      GridTools::shift(
+          //new Tensor<1, dim>(-cylinder_length/4, 0, 0),
+          Point<3>(-cylinder_length/4, 0, 0),
+          core_lower
+          );
+      //GridGenerator::create_triangulation_with_removed_cells(sample, core_upper, spacedim>::active_cell_iterator> &cells_to_remove, Triangulation<dim, spacedim> &result)
+
+      // Set material IDs
+      // Different material IDs in the vacuum region will be used to identify faces on the 
+      // "cut surface" which generates the boundary / source terms for flux quantization
+      for(auto &cell: sample.active_cell_iterators())
+      {
+        cell->set_material_id(sample_id);
+      }
+      for(auto &cell: core_upper.active_cell_iterators())
+      {
+        cell->set_material_id(core_upper_id);
+      }
+      for(auto &cell: core_lower.active_cell_iterators())
+      {
+        cell->set_material_id(core_lower_id);
+      }
+
+      // Merge triangulations
+      GridGenerator::merge_triangulations(sample, core_lower, sample_plus_core);
+      GridGenerator::merge_triangulations(sample_plus_core, core_upper, sample_plus_core);
+      //GridGenerator::create_triangulation_with_removed_cells(vacuum, sample_plus_core, vacuum);
+      // Not sure if this has to be done after the above subtraction operation, but it can't hurt
+      for(auto &cell: vacuum.active_cell_iterators())
+      {
+        cell->set_material_id(exterior_vacuum_id);
+      }
+      GridGenerator::merge_triangulations(sample_plus_core, vacuum, triangulation);
+    }
+
+  template<int dim>
+    void LondonStagedSolverClass<dim>::print_grids()
+    {
+      make_grid();
+      std::ofstream out("triangulation.svg");
+      GridOut grid_out;
+      grid_out.write_svg(triangulation, out);
+
+      std::cout << "Triangulation written to 'triangulation.svg'" << std::endl;
     }
 
   // Taken from step-46
   // This relies on the material IDs set in the function make_grid() to apply the correct FE function space to each cell
   template <int dim>
-  void LondonStagedSolver<dim>::setup_active_fe_indices()
+  void LondonStagedSolverClass<dim>::setup_active_fe_indices()
   {
     for (const auto &cell : dof_handler.active_cell_iterators())
       {
@@ -175,7 +286,7 @@ namespace LondonStagedSolver
   }
 
   template <int dim>
-  void LondonStagedSolver<dim>::setup_system()
+  void LondonStagedSolverClass<dim>::setup_system()
   {
     setup_active_fe_indices();
     dof_handler.distribute_dofs(fe_collection);
@@ -294,11 +405,12 @@ namespace LondonStagedSolver
 }
 
 int main() {
-  using namespace LondonStagedSolver;
-  using namespace dealii;
-
   try 
   {
+    using namespace LondonStagedSolver;
+
+    LondonStagedSolverClass<3> staged_solver(2);
+    staged_solver.print_grids();
   }
   catch(std::exception &exc) 
   {

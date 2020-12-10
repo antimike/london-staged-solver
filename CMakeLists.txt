@@ -12,7 +12,9 @@ DEAL_II_INITIALIZE_CACHED_VARIABLES()
 PROJECT(London-Staged-Solver)
 
 ADD_EXECUTABLE(solver solver.cc)
+#ADD_EXECUTABLE(cylinder_shell Geometry/cylinder_shell_with_core.cc)
 DEAL_II_SETUP_TARGET(solver)
+#DEAL_II_SETUP_TARGET(cylinder_shell)
 
 # Custom targets to simplify commands used to build in debug / release mode
 
